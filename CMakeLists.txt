@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(Ising_model)
+
+set(CMAKE_CXX_STANDARD 17)
+
+add_executable(Ising_model main.cpp)
