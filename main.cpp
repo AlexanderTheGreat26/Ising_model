@@ -7,92 +7,122 @@
 #include <tuple>
 #include <array>
 #include <algorithm>
-#include <memory>
 #include <sstream>
-
 
 typedef std::pair<int, int> index;
 typedef std::pair<double, double> data;
 typedef std::vector<std::vector<int>> spins;
 
-
 const int N = 10;
 const int left_border = 0;
 const int right_border = 9;
-const int number_of_experiments = 100;
-
+const double q = 4;
+const double J = 0;
 
 std::random_device rd;  // Will be used to obtain a seed for the random number engine
 std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
 
 
-void lattice_filling (spins & lattice);
+void mem_allocation (spins & vector, const int & dim);
+
+void lattice_filling (spins & lattice, const int & spin);
 
 int energy_of_system (spins & lattice);
 
-double temperature_definition (const double & E_mean, const int & spins_count);
+spins random_spin_flip (spins lattice);
 
-void random_spin_flip (spins & lattice, const int & left, const int & right);
+double magnetic_moment (spins & lattice);
 
-bool new_configuration (const double & dE, const double & T);
+bool is_new_configuration (const double & dE, const double & T);
 
-bool saturation (std::vector<int> & Energies, const int & error);
+double temperature_definition (double & M);
 
-std::vector<int> established_regime (std::vector<int> & Energies, const int & error);
+std::vector<data> table_data_creation (std::vector<double> &E);
 
 void data_file_creation (const std::string & name, std::vector<data> & exp_data);
 
-void vector_clear_2d (spins & vector);
+void isohoric_conductivity (std::vector<double> & T, std::vector<double> & E);
 
-void mem_allocation_2d (spins & vector, const int & dim);
-
-void plot (const std::string & name, const int & left, const int & right,
-           const std::string & xlabel, const std::string & ylabel, const std::string & title);
+void plot (const std::string & name, const std::string & xlabel, const std::string & ylabel,
+           const std::string & title);
 
 
 int main () {
-    spins lattice (N);
-    mem_allocation_2d (lattice, N);
-    lattice_filling(lattice);
-    int E, E0 = energy_of_system(lattice);
-    double T = temperature_definition(double(E0) / double(N), N);
-    int i = 0;
+    spins lattice(N), buff_lattice(N);
+    mem_allocation(lattice, N);
+    lattice_filling(lattice, 1);
+    double E0 = energy_of_system(lattice);
+    std::vector<double> E = {E0};
+    std::vector<double> T;
     int j = 0;
-    std::vector<int> Energies;
-    Energies.emplace_back(E0);
     do {
         do {
-            random_spin_flip(lattice, left_border, right_border);
-            E = energy_of_system(lattice);
-        } while (new_configuration(E0 - E, T));
-        ++i;
-        Energies.emplace_back(E);
-    } while (!saturation(Energies, 5));
-    return 0;
+            buff_lattice = std::move(random_spin_flip(lattice));
+            E.emplace_back(energy_of_system(buff_lattice));
+            double M = magnetic_moment(buff_lattice);
+            T.emplace_back(temperature_definition(M));
+            ++j;
+        } while (!is_new_configuration(E[j] - E[j-1], T[j-1]) && j%5 != 0);
+        lattice = buff_lattice;
+    } while (j < 10000);
+
+    isohoric_conductivity(T, E);
+    std::vector<data> E_n = std::move(table_data_creation(E));
+    data_file_creation("Energies", E_n);
+    plot("Energies", "n", "E", "E = E(n)");
 }
 
 
-std::vector<int> established_regime (std::vector<int> & Energies, const int & error) {
-    std::vector<int> stable;
-    for (int i = 1; i < Energies.size(); ++i)
-        if (std::abs(Energies[i] - Energies[i-1]) < error)
-            stable.emplace_back(Energies[i]);
-    return stable;
+double mean_square (std::vector<double> & Energies) {
+    int buf = 0;
+    for (int i = 200; i < Energies.size(); ++i)
+        buf += std::pow(Energies[i], 2);
+    return buf / double (Energies.size() - 200);
 }
 
 
-bool saturation (std::vector<int> & Energies, const int & error) {
-    for (int i = 1; i < Energies.size(); ++i)
-        if (std::abs(Energies[i] - Energies[i-1]) < error)
-            return true;
-    return false;
+double square_average (std::vector<double> & Energies) {
+    int buf = 0;
+    for (int i = 200; i < Energies.size(); ++i) // 200 is experimental data, lol.
+        buf += Energies[i];
+    return std::pow(double(buf) / double (Energies.size() - 200), 2);
 }
 
 
-void lattice_filling (spins & lattice) {
+void isohoric_conductivity (std::vector<double> & T, std::vector<double> & E) {
+    double T2 = square_average(T);
+    double c_v = 1.0 / T2 * (mean_square(E) - square_average(E));
+    std::cout << "C_v\t=\t" << c_v << std::endl;
+}
+
+
+bool is_new_configuration (const double & dE, const double & T) {
+    std::uniform_int_distribution<> dis (0, 1);
+    double ksi = dis(gen);
+    return (dE < 0 || ksi < std::exp(-(dE/T)));
+}
+
+
+double temperature_definition (double & M) {
+    return std::fabs(q / atanh(M));
+}
+
+
+double magnetic_moment (spins & lattice) {
+    int sum = 0;
     for (auto & i : lattice)
-        for (int & j : i)
-            j = 1;
+        for (int j : i)
+            sum += j;
+    return std::abs(double(sum) / double(std::pow(N, 2)));
+}
+
+
+spins random_spin_flip (spins lattice) {
+    std::uniform_int_distribution<> dis (0, lattice.size()-1);
+    int i = dis(gen);
+    int j = dis(gen);
+    lattice[i][j] *= -1;
+    return lattice;
 }
 
 
@@ -103,51 +133,30 @@ int energy_of_system (spins & lattice) {
             int S_0 = lattice[i][j];
             int S_1 = (i == N-1) ? lattice[0][j] : lattice[i+1][j];
             int S_2 = (j == N-1) ? lattice[i][0] : lattice[i][j+1];
-            sum += S_0*S_1 + S_0*S_2;
+            sum -= (S_0*S_1 + S_0*S_2);
         }
     return sum;
 }
 
 
-double temperature_definition (const double & E_mean, const int & spins_count) {
-    return -1.0 / std::atanh(E_mean / double(spins_count));
-}
-
-
-int Magnetic_moment (spins & lattice) {
-    int sum = 0;
+void lattice_filling (spins & lattice, const int & spin) {
     for (auto & i : lattice)
-        for (int j : i)
-            sum += j;
-    return sum;
+        for (int & j : i)
+            j = spin;
 }
 
 
-bool new_configuration (const double & dE, const double & T) {
-    std::uniform_int_distribution<> dis (0, 1);
-    double ksi = dis(gen);
-    return (dE < 0 || ksi < std::exp(-(dE/T)));
-}
-
-
-void random_spin_flip (spins & lattice, const int & left, const int & right) {
-    std::uniform_int_distribution<> dis (left, right);
-    int i = dis(gen);
-    int j = dis(gen);
-    lattice[i][j] *= -1;
-}
-
-
-// Did not allocate memory - died.
-void mem_allocation_2d (spins & vector, const int & dim) {
+void mem_allocation (spins & vector, const int & dim) {
     for (auto & i : vector)
         i.resize(dim);
 }
 
 
-void vector_clear_2d (spins & vector) {
-    for (auto & i : vector)
-        i.clear();
+std::vector<data> table_data_creation (std::vector<double> &E) {
+    std::vector<data> result (E.size());
+    for (int i = 0; i < E.size(); ++i)
+        result[i] = std::make_pair(i, E[i]);
+    return result;
 }
 
 
@@ -180,24 +189,21 @@ void data_file_creation (const std::string & name, std::vector<data> & exp_data)
 }
 
 
-void plot (const std::string & name, const int & left, const int & right,
-           const std::string & xlabel, const std::string & ylabel, const std::string & title) {
-    std::string range = "[" + toString(left) + ":" + toString(right) + "]";
+void plot (const std::string & name, const std::string & xlabel, const std::string & ylabel,
+           const std::string & title) {
     FILE *gp = popen("gnuplot  -persist", "w");
     if (!gp) throw std::runtime_error("Error opening pipe to GNUplot.");
     std::vector<std::string> stuff = {"set term jpeg size 700, 700",
                                       "set output \'" + name + ".jpg\'",
                                       "set title \'" + title + "\'",
-                                      "set xlabel" + xlabel,
-                                      "set ylabel" + ylabel,
+                                      "set xlabel \'" + xlabel + "\'",
+                                      "set ylabel \'" + ylabel + "\'",
                                       "set grid xtics ytics",
-                                      "set xrange " + range,
-                                      "set yrange " + range,
                                       "set key off",
                                       "set ticslevel 0",
                                       "set border 4095",
-                                      "plot \'" + name + ".txt\' using 1:2 w lines",
-                                      "set terminal wxt",
+                                      "plot \'" + name + "\' using 1:2 w lines",
+                                      "set terminal pop",
                                       "set output",
                                       "replot", "q"};
     for (const auto & it: stuff)
